@@ -18,6 +18,7 @@ import {
   NanoBananaNodeData,
   LLMGenerateNodeData,
   OutputNodeData,
+  GridSplitNodeData,
   WorkflowNodeData,
   ImageHistoryItem,
   WorkflowSaveConfig,
@@ -31,12 +32,12 @@ export type EdgeStyle = "angular" | "curved";
 // Workflow file format
 export interface WorkflowFile {
   version: 1;
-  id?: string;  // Optional for backward compatibility with old/shared workflows
+  id?: string; // Optional for backward compatibility with old/shared workflows
   name: string;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   edgeStyle: EdgeStyle;
-  groups?: Record<string, NodeGroup>;  // Optional for backward compatibility
+  groups?: Record<string, NodeGroup>; // Optional for backward compatibility
 }
 
 // Clipboard data structure for copy/paste
@@ -96,7 +97,10 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; text: string | null };
+  getConnectedInputs: (nodeId: string) => {
+    images: string[];
+    text: string | null;
+  };
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -115,7 +119,12 @@ interface WorkflowStore {
   isSaving: boolean;
 
   // Auto-save actions
-  setWorkflowMetadata: (id: string, name: string, path: string, generationsPath: string | null) => void;
+  setWorkflowMetadata: (
+    id: string,
+    name: string,
+    path: string,
+    generationsPath: string | null
+  ) => void;
   setWorkflowName: (name: string) => void;
   setGenerationsPath: (path: string | null) => void;
   setAutoSaveEnabled: (enabled: boolean) => void;
@@ -170,6 +179,15 @@ const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
       return {
         image: null,
       } as OutputNodeData;
+    case "gridSplit":
+      return {
+        inputImage: null,
+        rows: 2,
+        columns: 2,
+        status: "idle",
+        error: null,
+        tileOutputs: {},
+      } as GridSplitNodeData;
   }
 };
 
@@ -188,7 +206,12 @@ export const GROUP_COLORS: Record<GroupColor, string> = {
 };
 
 const GROUP_COLOR_ORDER: GroupColor[] = [
-  "neutral", "blue", "green", "purple", "orange", "red"
+  "neutral",
+  "blue",
+  "green",
+  "purple",
+  "orange",
+  "red",
 ];
 
 // localStorage helpers for auto-save configs
@@ -241,13 +264,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const id = `${type}-${++nodeIdCounter}`;
 
     // Default dimensions based on node type
-    const defaultDimensions: Record<NodeType, { width: number; height: number }> = {
+    const defaultDimensions: Record<
+      NodeType,
+      { width: number; height: number }
+    > = {
       imageInput: { width: 300, height: 280 },
       annotation: { width: 300, height: 280 },
       prompt: { width: 320, height: 220 },
       nanoBanana: { width: 300, height: 300 },
       llmGenerate: { width: 320, height: 360 },
       output: { width: 320, height: 320 },
+      gridSplit: { width: 320, height: 400 },
     };
 
     const { width, height } = defaultDimensions[type];
@@ -314,7 +341,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       edges: addEdge(
         {
           ...connection,
-          id: `edge-${connection.source}-${connection.target}-${connection.sourceHandle || "default"}-${connection.targetHandle || "default"}`,
+          id: `edge-${connection.source}-${connection.target}-${
+            connection.sourceHandle || "default"
+          }-${connection.targetHandle || "default"}`,
         },
         state.edges
       ),
@@ -350,12 +379,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
     // Copy edges that connect selected nodes to each other
     const connectedEdges = edges.filter(
-      (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+      (edge) =>
+        selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
     );
 
     // Deep clone the nodes and edges to avoid reference issues
-    const clonedNodes = JSON.parse(JSON.stringify(selectedNodes)) as WorkflowNode[];
-    const clonedEdges = JSON.parse(JSON.stringify(connectedEdges)) as WorkflowEdge[];
+    const clonedNodes = JSON.parse(
+      JSON.stringify(selectedNodes)
+    ) as WorkflowNode[];
+    const clonedEdges = JSON.parse(
+      JSON.stringify(connectedEdges)
+    ) as WorkflowEdge[];
 
     set({ clipboard: { nodes: clonedNodes, edges: clonedEdges } });
   },
@@ -389,7 +423,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     // Create new edges with updated source/target IDs
     const newEdges: WorkflowEdge[] = clipboard.edges.map((edge) => ({
       ...edge,
-      id: `edge-${idMapping.get(edge.source)}-${idMapping.get(edge.target)}-${edge.sourceHandle || "default"}-${edge.targetHandle || "default"}`,
+      id: `edge-${idMapping.get(edge.source)}-${idMapping.get(edge.target)}-${
+        edge.sourceHandle || "default"
+      }-${edge.targetHandle || "default"}`,
       source: idMapping.get(edge.source)!,
       target: idMapping.get(edge.target)!,
     }));
@@ -422,7 +458,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     if (nodesToGroup.length === 0) return "";
 
     // Default dimensions per node type
-    const defaultNodeDimensions: Record<string, { width: number; height: number }> = {
+    const defaultNodeDimensions: Record<
+      string,
+      { width: number; height: number }
+    > = {
       imageInput: { width: 300, height: 280 },
       annotation: { width: 300, height: 280 },
       prompt: { width: 320, height: 220 },
@@ -432,12 +471,22 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     };
 
     // Calculate bounding box of selected nodes
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     nodesToGroup.forEach((node) => {
       // Use measured dimensions (actual rendered size) first, then style, then type-specific defaults
-      const defaults = defaultNodeDimensions[node.type] || { width: 300, height: 280 };
-      const width = node.measured?.width || (node.style?.width as number) || defaults.width;
-      const height = node.measured?.height || (node.style?.height as number) || defaults.height;
+      const defaults = defaultNodeDimensions[node.type] || {
+        width: 300,
+        height: 280,
+      };
+      const width =
+        node.measured?.width || (node.style?.width as number) || defaults.width;
+      const height =
+        node.measured?.height ||
+        (node.style?.height as number) ||
+        defaults.height;
 
       minX = Math.min(minX, node.position.x);
       minY = Math.min(minY, node.position.y);
@@ -470,7 +519,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       color,
       position: {
         x: minX - padding,
-        y: minY - padding - headerHeight
+        y: minY - padding - headerHeight,
       },
       size: {
         width: maxX - minX + padding * 2,
@@ -573,6 +622,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         if (!sourceNode) return;
 
         const handleId = edge.targetHandle;
+        const sourceHandle = edge.sourceHandle;
 
         if (handleId === "image" || !handleId) {
           // Get image from source node - collect all connected images
@@ -580,11 +630,25 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             const sourceImage = (sourceNode.data as ImageInputNodeData).image;
             if (sourceImage) images.push(sourceImage);
           } else if (sourceNode.type === "annotation") {
-            const sourceImage = (sourceNode.data as AnnotationNodeData).outputImage;
+            const sourceImage = (sourceNode.data as AnnotationNodeData)
+              .outputImage;
             if (sourceImage) images.push(sourceImage);
           } else if (sourceNode.type === "nanoBanana") {
-            const sourceImage = (sourceNode.data as NanoBananaNodeData).outputImage;
+            const sourceImage = (sourceNode.data as NanoBananaNodeData)
+              .outputImage;
             if (sourceImage) images.push(sourceImage);
+          } else if (sourceNode.type === "gridSplit") {
+            // Get specific tile from gridSplit node
+            const tileOutputs = (sourceNode.data as GridSplitNodeData)
+              .tileOutputs;
+            console.log("[getConnectedInputs] GridSplit tile request:", {
+              sourceHandle,
+              availableTiles: Object.keys(tileOutputs),
+              hasTile: !!(sourceHandle && tileOutputs[sourceHandle]),
+            });
+            if (sourceHandle && tileOutputs[sourceHandle]) {
+              images.push(tileOutputs[sourceHandle]);
+            }
           }
         }
 
@@ -634,7 +698,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       .filter((n) => n.type === "annotation")
       .forEach((node) => {
         const imageConnected = edges.some((e) => e.target === node.id);
-        const hasManualImage = (node.data as AnnotationNodeData).sourceImage !== null;
+        const hasManualImage =
+          (node.data as AnnotationNodeData).sourceImage !== null;
         if (!imageConnected && !hasManualImage) {
           errors.push(`Annotation node "${node.id}" missing image input`);
         }
@@ -650,11 +715,29 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         }
       });
 
+    // Check grid split nodes have image input and valid configuration
+    nodes
+      .filter((n) => n.type === "gridSplit")
+      .forEach((node) => {
+        const imageConnected = edges.some((e) => e.target === node.id);
+        if (!imageConnected) {
+          errors.push(`Grid Split node "${node.id}" missing image input`);
+        }
+
+        const nodeData = node.data as GridSplitNodeData;
+        if (nodeData.rows * nodeData.columns > 64) {
+          errors.push(
+            `Grid Split node "${node.id}" exceeds max tile count (64)`
+          );
+        }
+      });
+
     return { valid: errors.length === 0, errors };
   },
 
   executeWorkflow: async (startFromNodeId?: string) => {
-    const { nodes, edges, updateNodeData, getConnectedInputs, isRunning } = get();
+    const { nodes, edges, updateNodeData, getConnectedInputs, isRunning } =
+      get();
 
     if (isRunning) {
       return;
@@ -677,9 +760,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       visiting.add(nodeId);
 
       // Visit all nodes that this node depends on
-      edges
-        .filter((e) => e.target === nodeId)
-        .forEach((e) => visit(e.source));
+      edges.filter((e) => e.target === nodeId).forEach((e) => visit(e.source));
 
       visiting.delete(nodeId);
       visited.add(nodeId);
@@ -711,8 +792,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           const incomingEdges = edges.filter((e) => e.target === node.id);
           const pauseEdge = incomingEdges.find((e) => e.data?.hasPause);
           if (pauseEdge) {
-            set({ pausedAtNodeId: node.id, isRunning: false, currentNodeId: null });
-            useToast.getState().show("Workflow paused - click Run to continue", "warning");
+            set({
+              pausedAtNodeId: node.id,
+              isRunning: false,
+              currentNodeId: null,
+            });
+            useToast
+              .getState()
+              .show("Workflow paused - click Run to continue", "warning");
             return;
           }
         }
@@ -789,7 +876,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                   const errorJson = JSON.parse(errorText);
                   errorMessage = errorJson.error || errorMessage;
                 } catch {
-                  if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+                  if (errorText)
+                    errorMessage += ` - ${errorText.substring(0, 200)}`;
                 }
 
                 updateNodeData(node.id, {
@@ -842,10 +930,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
               }
             } catch (error) {
               let errorMessage = "Generation failed";
-              if (error instanceof DOMException && error.name === 'AbortError') {
-                errorMessage = "Request timed out. Try reducing image sizes or using a simpler prompt.";
-              } else if (error instanceof TypeError && error.message.includes('NetworkError')) {
-                errorMessage = "Network error. Check your connection and try again.";
+              if (
+                error instanceof DOMException &&
+                error.name === "AbortError"
+              ) {
+                errorMessage =
+                  "Request timed out. Try reducing image sizes or using a simpler prompt.";
+              } else if (
+                error instanceof TypeError &&
+                error.message.includes("NetworkError")
+              ) {
+                errorMessage =
+                  "Network error. Check your connection and try again.";
               } else if (error instanceof TypeError) {
                 errorMessage = `Network error: ${error.message}`;
               } else if (error instanceof Error) {
@@ -901,7 +997,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                   const errorJson = JSON.parse(errorText);
                   errorMessage = errorJson.error || errorMessage;
                 } catch {
-                  if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+                  if (errorText)
+                    errorMessage += ` - ${errorText.substring(0, 200)}`;
                 }
                 updateNodeData(node.id, {
                   status: "error",
@@ -930,7 +1027,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             } catch (error) {
               updateNodeData(node.id, {
                 status: "error",
-                error: error instanceof Error ? error.message : "LLM generation failed",
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "LLM generation failed",
               });
               set({ isRunning: false, currentNodeId: null });
               return;
@@ -943,6 +1043,94 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             const image = images[0] || null;
             if (image) {
               updateNodeData(node.id, { image });
+            }
+            break;
+          }
+
+          case "gridSplit": {
+            const { images } = getConnectedInputs(node.id);
+            const image = images[0] || null;
+
+            console.log("[GridSplit] Executing:", {
+              nodeId: node.id,
+              hasImage: !!image,
+              imageLength: image?.length,
+            });
+
+            if (!image) {
+              console.error("[GridSplit] No image input found");
+              updateNodeData(node.id, {
+                status: "error",
+                error: "Missing image input",
+                inputImage: null,
+                tileOutputs: {},
+              });
+              break;
+            }
+
+            const nodeData = node.data as GridSplitNodeData;
+            const { rows, columns } = nodeData;
+
+            console.log("[GridSplit] Configuration:", {
+              rows,
+              columns,
+              totalTiles: rows * columns,
+            });
+
+            // Validate tile count
+            if (rows * columns > 64) {
+              updateNodeData(node.id, {
+                status: "error",
+                error: "Too many tiles (max 64)",
+                inputImage: image,
+                tileOutputs: {},
+              });
+              break;
+            }
+
+            updateNodeData(node.id, {
+              inputImage: image,
+              status: "loading",
+              error: null,
+              tileOutputs: {},
+            });
+
+            try {
+              const { splitImageIntoTiles } = await import(
+                "@/utils/imageSplitter"
+              );
+              const tiles = await splitImageIntoTiles(image, rows, columns);
+
+              console.log(
+                "[GridSplit] Split complete, tiles created:",
+                tiles.length
+              );
+
+              // Build tileOutputs map
+              const tileOutputs: Record<string, string> = {};
+              tiles.forEach((tile) => {
+                tileOutputs[tile.handleId] = tile.imageBase64;
+              });
+
+              console.log(
+                "[GridSplit] Tile output handles:",
+                Object.keys(tileOutputs)
+              );
+
+              updateNodeData(node.id, {
+                status: "complete",
+                tileOutputs,
+              });
+            } catch (error) {
+              console.error("[GridSplit] Split failed:", error);
+              updateNodeData(node.id, {
+                status: "error",
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to split image",
+                tileOutputs: {},
+              });
             }
             break;
           }
@@ -979,7 +1167,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
         // Always get fresh connected inputs first, fall back to stored inputs only if not connected
         const inputs = getConnectedInputs(nodeId);
-        let images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
+        let images =
+          inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
         let text = inputs.text ?? nodeData.inputPrompt;
 
         if (!images || images.length === 0 || !text) {
@@ -1120,6 +1309,91 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             error: result.error || "LLM generation failed",
           });
         }
+      } else if (node.type === "gridSplit") {
+        const nodeData = node.data as GridSplitNodeData;
+
+        // Get fresh connected input
+        const inputs = getConnectedInputs(nodeId);
+        const image = inputs.images[0] || null;
+
+        console.log("[GridSplit Regenerate] Executing:", {
+          nodeId,
+          hasImage: !!image,
+        });
+
+        if (!image) {
+          console.error("[GridSplit Regenerate] No image input found");
+          updateNodeData(nodeId, {
+            status: "error",
+            error: "Missing image input",
+            tileOutputs: {},
+          });
+          set({ isRunning: false, currentNodeId: null });
+          return;
+        }
+
+        const { rows, columns } = nodeData;
+
+        if (rows * columns > 64) {
+          updateNodeData(nodeId, {
+            status: "error",
+            error: "Too many tiles (max 64)",
+            tileOutputs: {},
+          });
+          set({ isRunning: false, currentNodeId: null });
+          return;
+        }
+
+        updateNodeData(nodeId, {
+          inputImage: image,
+          status: "loading",
+          error: null,
+          tileOutputs: {},
+        });
+
+        try {
+          const { splitImageIntoTiles } = await import("@/utils/imageSplitter");
+          const tiles = await splitImageIntoTiles(image, rows, columns);
+
+          console.log(
+            "[GridSplit Regenerate] Split complete, tiles created:",
+            tiles.length
+          );
+
+          const tileOutputs: Record<string, string> = {};
+          tiles.forEach((tile) => {
+            tileOutputs[tile.handleId] = tile.imageBase64;
+          });
+
+          updateNodeData(nodeId, {
+            status: "complete",
+            tileOutputs,
+          });
+        } catch (error) {
+          console.error("[GridSplit Regenerate] Split failed:", error);
+          updateNodeData(nodeId, {
+            status: "error",
+            error:
+              error instanceof Error ? error.message : "Failed to split image",
+            tileOutputs: {},
+          });
+        }
+      }
+
+      // After regenerating, update immediate downstream output nodes
+      const { edges, nodes: allNodes } = get();
+      const downstreamEdges = edges.filter((e) => e.source === nodeId);
+
+      for (const edge of downstreamEdges) {
+        const downstreamNode = allNodes.find((n) => n.id === edge.target);
+        if (downstreamNode?.type === "output") {
+          // Update output nodes with connected inputs
+          const { images } = getConnectedInputs(downstreamNode.id);
+          const image = images[0] || null;
+          if (image) {
+            updateNodeData(downstreamNode.id, { image });
+          }
+        }
       }
 
       set({ isRunning: false, currentNodeId: null });
@@ -1232,7 +1506,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   // Auto-save actions
-  setWorkflowMetadata: (id: string, name: string, path: string, generationsPath: string | null) => {
+  setWorkflowMetadata: (
+    id: string,
+    name: string,
+    path: string,
+    generationsPath: string | null
+  ) => {
     set({
       workflowId: id,
       workflowName: name,
@@ -1330,7 +1609,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       useToast
         .getState()
         .show(
-          `Auto-save failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+          `Auto-save failed: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
           "error"
         );
       return false;

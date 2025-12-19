@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useRef, useState, useEffect, DragEvent, useMemo } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  useEffect,
+  DragEvent,
+  useMemo,
+} from "react";
 import {
   ReactFlow,
   Background,
@@ -24,6 +31,7 @@ import {
   NanoBananaNode,
   LLMGenerateNode,
   OutputNode,
+  GridSplitNode,
 } from "./nodes";
 import { EditableEdge } from "./edges";
 import { ConnectionDropMenu, MenuAction } from "./ConnectionDropMenu";
@@ -41,6 +49,7 @@ const nodeTypes: NodeTypes = {
   nanoBanana: NanoBananaNode,
   llmGenerate: LLMGenerateNode,
   output: OutputNode,
+  gridSplit: GridSplitNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -50,11 +59,17 @@ const edgeTypes: EdgeTypes = {
 // Connection validation rules
 // - Image handles (green) can only connect to image handles
 // - Text handles (blue) can only connect to text handles
+// - Tile handles from gridSplit can connect to image inputs
 // - NanoBanana image input accepts multiple connections
 // - All other inputs accept only one connection
 const isValidConnection = (connection: Edge | Connection): boolean => {
   const sourceHandle = connection.sourceHandle;
   const targetHandle = connection.targetHandle;
+
+  // Tile outputs from gridSplit can connect to image inputs
+  if (sourceHandle?.startsWith("tile-") && targetHandle === "image") {
+    return true;
+  }
 
   // Strict type matching: image <-> image, text <-> text
   if (sourceHandle === "image" && targetHandle !== "image") {
@@ -68,7 +83,9 @@ const isValidConnection = (connection: Edge | Connection): boolean => {
 };
 
 // Define which handles each node type has
-const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[] } => {
+const getNodeHandles = (
+  nodeType: string
+): { inputs: string[]; outputs: string[] } => {
   switch (nodeType) {
     case "imageInput":
       return { inputs: [], outputs: ["image"] };
@@ -82,6 +99,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["text", "image"], outputs: ["text"] };
     case "output":
       return { inputs: ["image"], outputs: [] };
+    case "gridSplit":
+      return { inputs: ["image"], outputs: ["tile"] }; // Dynamic outputs handled in node
     default:
       return { inputs: [], outputs: [] };
   }
@@ -97,12 +116,27 @@ interface ConnectionDropState {
 }
 
 export function WorkflowCanvas() {
-  const { nodes, edges, groups, onNodesChange, onEdgesChange, onConnect, addNode, updateNodeData, loadWorkflow, getNodeById, addToGlobalHistory, setNodeGroupId } =
-    useWorkflowStore();
+  const {
+    nodes,
+    edges,
+    groups,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    addNode,
+    updateNodeData,
+    loadWorkflow,
+    getNodeById,
+    addToGlobalHistory,
+    setNodeGroupId,
+  } = useWorkflowStore();
   const { screenToFlowPosition, getViewport } = useReactFlow();
   const [isDragOver, setIsDragOver] = useState(false);
-  const [dropType, setDropType] = useState<"image" | "workflow" | "node" | null>(null);
-  const [connectionDrop, setConnectionDrop] = useState<ConnectionDropState | null>(null);
+  const [dropType, setDropType] = useState<
+    "image" | "workflow" | "node" | null
+  >(null);
+  const [connectionDrop, setConnectionDrop] =
+    useState<ConnectionDropState | null>(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
@@ -110,7 +144,6 @@ export function WorkflowCanvas() {
   const allNodes = useMemo(() => {
     return nodes;
   }, [nodes]);
-
 
   // Check if a node was dropped into a group and add it to that group
   const handleNodeDragStop = useCallback(
@@ -127,8 +160,12 @@ export function WorkflowCanvas() {
       let targetGroupId: string | undefined;
 
       for (const group of Object.values(groups)) {
-        const inBoundsX = nodeCenterX >= group.position.x && nodeCenterX <= group.position.x + group.size.width;
-        const inBoundsY = nodeCenterY >= group.position.y && nodeCenterY <= group.position.y + group.size.height;
+        const inBoundsX =
+          nodeCenterX >= group.position.x &&
+          nodeCenterX <= group.position.x + group.size.width;
+        const inBoundsY =
+          nodeCenterY >= group.position.y &&
+          nodeCenterY <= group.position.y + group.size.height;
 
         if (inBoundsX && inBoundsY) {
           targetGroupId = group.id;
@@ -158,7 +195,11 @@ export function WorkflowCanvas() {
 
       // If the source node is selected and there are multiple selected nodes,
       // connect all selected nodes that have the same source handle type
-      if (sourceNode?.selected && selectedNodes.length > 1 && connection.sourceHandle) {
+      if (
+        sourceNode?.selected &&
+        selectedNodes.length > 1 &&
+        connection.sourceHandle
+      ) {
         selectedNodes.forEach((node) => {
           // Skip if this is already the connection source
           if (node.id === connection.source) {
@@ -168,7 +209,9 @@ export function WorkflowCanvas() {
 
           // Check if this node actually has the same output handle type
           const nodeHandles = getNodeHandles(node.type || "");
-          if (!nodeHandles.outputs.includes(connection.sourceHandle as string)) {
+          if (
+            !nodeHandles.outputs.includes(connection.sourceHandle as string)
+          ) {
             // This node doesn't have the same output handle type, skip it
             return;
           }
@@ -203,7 +246,10 @@ export function WorkflowCanvas() {
 
       const { clientX, clientY } = event as MouseEvent;
       const fromHandleId = connectionState.fromHandle?.id || null;
-      const fromHandleType = (fromHandleId === "image" || fromHandleId === "text") ? fromHandleId : null;
+      const fromHandleType =
+        fromHandleId === "image" || fromHandleId === "text"
+          ? fromHandleId
+          : null;
       const isFromSource = connectionState.fromHandle?.type === "source";
 
       // Check if we dropped on a node by looking for node elements under the cursor
@@ -214,10 +260,16 @@ export function WorkflowCanvas() {
       });
 
       if (nodeElement) {
-        const nodeWrapper = nodeElement.closest(".react-flow__node") as HTMLElement;
+        const nodeWrapper = nodeElement.closest(
+          ".react-flow__node"
+        ) as HTMLElement;
         const targetNodeId = nodeWrapper?.dataset.id;
 
-        if (targetNodeId && targetNodeId !== connectionState.fromNode.id && fromHandleType) {
+        if (
+          targetNodeId &&
+          targetNodeId !== connectionState.fromNode.id &&
+          fromHandleType
+        ) {
           const targetNode = nodes.find((n) => n.id === targetNodeId);
 
           if (targetNode) {
@@ -291,7 +343,8 @@ export function WorkflowCanvas() {
       } else if (sourceNode.type === "imageInput") {
         sourceImage = (sourceNode.data as { image: string | null }).image;
       } else if (sourceNode.type === "annotation") {
-        sourceImage = (sourceNode.data as { outputImage: string | null }).outputImage;
+        sourceImage = (sourceNode.data as { outputImage: string | null })
+          .outputImage;
       }
 
       if (!sourceImage) {
@@ -299,7 +352,10 @@ export function WorkflowCanvas() {
         return;
       }
 
-      const sourceNodeData = sourceNode.type === "nanoBanana" ? sourceNode.data as NanoBananaNodeData : null;
+      const sourceNodeData =
+        sourceNode.type === "nanoBanana"
+          ? (sourceNode.data as NanoBananaNodeData)
+          : null;
       setIsSplitting(true);
 
       try {
@@ -323,7 +379,9 @@ export function WorkflowCanvas() {
           addToGlobalHistory({
             image: imageData,
             timestamp: Date.now() + index,
-            prompt: `Split ${row + 1}-${col + 1} from ${grid.rows}x${grid.cols} grid`,
+            prompt: `Split ${row + 1}-${col + 1} from ${grid.rows}x${
+              grid.cols
+            } grid`,
             aspectRatio: sourceNodeData?.aspectRatio || "1:1",
             model: sourceNodeData?.model || "nano-banana",
           });
@@ -351,10 +409,17 @@ export function WorkflowCanvas() {
           img.src = imageData;
         });
 
-        console.log(`[SplitGrid] Created ${images.length} nodes from ${grid.rows}x${grid.cols} grid (confidence: ${Math.round(grid.confidence * 100)}%)`);
+        console.log(
+          `[SplitGrid] Created ${images.length} nodes from ${grid.rows}x${
+            grid.cols
+          } grid (confidence: ${Math.round(grid.confidence * 100)}%)`
+        );
       } catch (error) {
         console.error("[SplitGrid] Error:", error);
-        alert("Failed to split image grid: " + (error instanceof Error ? error.message : "Unknown error"));
+        alert(
+          "Failed to split image grid: " +
+            (error instanceof Error ? error.message : "Unknown error")
+        );
       } finally {
         setIsSplitting(false);
       }
@@ -363,28 +428,37 @@ export function WorkflowCanvas() {
   );
 
   // Helper to get image from a node
-  const getImageFromNode = useCallback((nodeId: string): string | null => {
-    const node = getNodeById(nodeId);
-    if (!node) return null;
+  const getImageFromNode = useCallback(
+    (nodeId: string): string | null => {
+      const node = getNodeById(nodeId);
+      if (!node) return null;
 
-    switch (node.type) {
-      case "imageInput":
-        return (node.data as { image: string | null }).image;
-      case "annotation":
-        return (node.data as { outputImage: string | null }).outputImage;
-      case "nanoBanana":
-        return (node.data as { outputImage: string | null }).outputImage;
-      default:
-        return null;
-    }
-  }, [getNodeById]);
+      switch (node.type) {
+        case "imageInput":
+          return (node.data as { image: string | null }).image;
+        case "annotation":
+          return (node.data as { outputImage: string | null }).outputImage;
+        case "nanoBanana":
+          return (node.data as { outputImage: string | null }).outputImage;
+        default:
+          return null;
+      }
+    },
+    [getNodeById]
+  );
 
   // Handle node selection from drop menu
   const handleMenuSelect = useCallback(
     (selection: { type: NodeType | MenuAction; isAction: boolean }) => {
       if (!connectionDrop) return;
 
-      const { flowPosition, sourceNodeId, sourceHandleId, connectionType, handleType } = connectionDrop;
+      const {
+        flowPosition,
+        sourceNodeId,
+        sourceHandleId,
+        connectionType,
+        handleType,
+      } = connectionDrop;
 
       // Handle actions differently from node creation
       if (selection.isAction) {
@@ -402,7 +476,12 @@ export function WorkflowCanvas() {
       const newNodeId = addNode(nodeType, flowPosition);
 
       // If creating an annotation node from an image source, populate it with the source image
-      if (nodeType === "annotation" && connectionType === "source" && handleType === "image" && sourceNodeId) {
+      if (
+        nodeType === "annotation" &&
+        connectionType === "source" &&
+        handleType === "image" &&
+        sourceNodeId
+      ) {
         const sourceImage = getImageFromNode(sourceNodeId);
         if (sourceImage) {
           updateNodeData(newNodeId, { sourceImage, outputImage: sourceImage });
@@ -468,7 +547,12 @@ export function WorkflowCanvas() {
         });
       } else {
         // Single node connection (original behavior)
-        if (connectionType === "source" && sourceNodeId && sourceHandleId && targetHandleId) {
+        if (
+          connectionType === "source" &&
+          sourceNodeId &&
+          sourceHandleId &&
+          targetHandleId
+        ) {
           // Dragging from source (output), connect to new node's input
           const connection: Connection = {
             source: sourceNodeId,
@@ -477,7 +561,12 @@ export function WorkflowCanvas() {
             targetHandle: targetHandleId,
           };
           onConnect(connection);
-        } else if (connectionType === "target" && sourceNodeId && sourceHandleId && sourceHandleIdForNewNode) {
+        } else if (
+          connectionType === "target" &&
+          sourceNodeId &&
+          sourceHandleId &&
+          sourceHandleIdForNewNode
+        ) {
           // Dragging from target (input), connect from new node's output
           const connection: Connection = {
             source: newNodeId,
@@ -491,7 +580,15 @@ export function WorkflowCanvas() {
 
       setConnectionDrop(null);
     },
-    [connectionDrop, addNode, onConnect, nodes, handleSplitGridAction, getImageFromNode, updateNodeData]
+    [
+      connectionDrop,
+      addNode,
+      onConnect,
+      nodes,
+      handleSplitGridAction,
+      getImageFromNode,
+      updateNodeData,
+    ]
   );
 
   const handleCloseDropMenu = useCallback(() => {
@@ -499,7 +596,8 @@ export function WorkflowCanvas() {
   }, []);
 
   // Get copy/paste functions and clipboard from store
-  const { copySelectedNodes, pasteNodes, clearClipboard, clipboard } = useWorkflowStore();
+  const { copySelectedNodes, pasteNodes, clearClipboard, clipboard } =
+    useWorkflowStore();
 
   // Keyboard shortcuts for copy/paste and stacking selected nodes
   useEffect(() => {
@@ -554,16 +652,23 @@ export function WorkflowCanvas() {
           event.preventDefault();
           const { centerX, centerY } = getViewportCenter();
           // Offset by half the default node dimensions to center it
-          const defaultDimensions: Record<NodeType, { width: number; height: number }> = {
+          const defaultDimensions: Record<
+            NodeType,
+            { width: number; height: number }
+          > = {
             imageInput: { width: 300, height: 280 },
             annotation: { width: 300, height: 280 },
             prompt: { width: 320, height: 220 },
             nanoBanana: { width: 300, height: 300 },
             llmGenerate: { width: 320, height: 360 },
             output: { width: 320, height: 320 },
+            gridSplit: { width: 320, height: 400 },
           };
           const dims = defaultDimensions[nodeType];
-          addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
+          addNode(nodeType, {
+            x: centerX - dims.width / 2,
+            y: centerY - dims.height / 2,
+          });
           return;
         }
       }
@@ -580,53 +685,68 @@ export function WorkflowCanvas() {
         }
 
         // Check system clipboard for images first, then text
-        navigator.clipboard.read().then(async (items) => {
-          for (const item of items) {
-            // Check for image
-            const imageType = item.types.find(type => type.startsWith('image/'));
-            if (imageType) {
-              const blob = await item.getType(imageType);
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                const dataUrl = e.target?.result as string;
-                const viewport = getViewport();
-                const centerX = (-viewport.x + window.innerWidth / 2) / viewport.zoom;
-                const centerY = (-viewport.y + window.innerHeight / 2) / viewport.zoom;
+        navigator.clipboard
+          .read()
+          .then(async (items) => {
+            for (const item of items) {
+              // Check for image
+              const imageType = item.types.find((type) =>
+                type.startsWith("image/")
+              );
+              if (imageType) {
+                const blob = await item.getType(imageType);
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                  const dataUrl = e.target?.result as string;
+                  const viewport = getViewport();
+                  const centerX =
+                    (-viewport.x + window.innerWidth / 2) / viewport.zoom;
+                  const centerY =
+                    (-viewport.y + window.innerHeight / 2) / viewport.zoom;
 
-                const img = new Image();
-                img.onload = () => {
-                  // ImageInput node default dimensions: 300x280
-                  const nodeId = addNode("imageInput", { x: centerX - 150, y: centerY - 140 });
-                  updateNodeData(nodeId, {
-                    image: dataUrl,
-                    filename: `pasted-${Date.now()}.png`,
-                    dimensions: { width: img.width, height: img.height },
-                  });
+                  const img = new Image();
+                  img.onload = () => {
+                    // ImageInput node default dimensions: 300x280
+                    const nodeId = addNode("imageInput", {
+                      x: centerX - 150,
+                      y: centerY - 140,
+                    });
+                    updateNodeData(nodeId, {
+                      image: dataUrl,
+                      filename: `pasted-${Date.now()}.png`,
+                      dimensions: { width: img.width, height: img.height },
+                    });
+                  };
+                  img.src = dataUrl;
                 };
-                img.src = dataUrl;
-              };
-              reader.readAsDataURL(blob);
-              return; // Exit after handling image
-            }
+                reader.readAsDataURL(blob);
+                return; // Exit after handling image
+              }
 
-            // Check for text
-            if (item.types.includes('text/plain')) {
-              const blob = await item.getType('text/plain');
-              const text = await blob.text();
-              if (text.trim()) {
-                const viewport = getViewport();
-                const centerX = (-viewport.x + window.innerWidth / 2) / viewport.zoom;
-                const centerY = (-viewport.y + window.innerHeight / 2) / viewport.zoom;
-                // Prompt node default dimensions: 320x220
-                const nodeId = addNode("prompt", { x: centerX - 160, y: centerY - 110 });
-                updateNodeData(nodeId, { prompt: text });
-                return; // Exit after handling text
+              // Check for text
+              if (item.types.includes("text/plain")) {
+                const blob = await item.getType("text/plain");
+                const text = await blob.text();
+                if (text.trim()) {
+                  const viewport = getViewport();
+                  const centerX =
+                    (-viewport.x + window.innerWidth / 2) / viewport.zoom;
+                  const centerY =
+                    (-viewport.y + window.innerHeight / 2) / viewport.zoom;
+                  // Prompt node default dimensions: 320x220
+                  const nodeId = addNode("prompt", {
+                    x: centerX - 160,
+                    y: centerY - 110,
+                  });
+                  updateNodeData(nodeId, { prompt: text });
+                  return; // Exit after handling text
+                }
               }
             }
-          }
-        }).catch(() => {
-          // Clipboard API failed - nothing to paste
-        });
+          })
+          .catch(() => {
+            // Clipboard API failed - nothing to paste
+          });
         return;
       }
 
@@ -637,7 +757,9 @@ export function WorkflowCanvas() {
 
       if (event.key === "v" || event.key === "V") {
         // Stack vertically - sort by current y position to maintain relative order
-        const sortedNodes = [...selectedNodes].sort((a, b) => a.position.y - b.position.y);
+        const sortedNodes = [...selectedNodes].sort(
+          (a, b) => a.position.y - b.position.y
+        );
 
         // Use the leftmost x position as the alignment point
         const alignX = Math.min(...sortedNodes.map((n) => n.position.x));
@@ -645,7 +767,8 @@ export function WorkflowCanvas() {
         let currentY = sortedNodes[0].position.y;
 
         sortedNodes.forEach((node) => {
-          const nodeHeight = (node.style?.height as number) || (node.measured?.height) || 200;
+          const nodeHeight =
+            (node.style?.height as number) || node.measured?.height || 200;
 
           onNodesChange([
             {
@@ -659,7 +782,9 @@ export function WorkflowCanvas() {
         });
       } else if (event.key === "h" || event.key === "H") {
         // Stack horizontally - sort by current x position to maintain relative order
-        const sortedNodes = [...selectedNodes].sort((a, b) => a.position.x - b.position.x);
+        const sortedNodes = [...selectedNodes].sort(
+          (a, b) => a.position.x - b.position.x
+        );
 
         // Use the topmost y position as the alignment point
         const alignY = Math.min(...sortedNodes.map((n) => n.position.y));
@@ -667,7 +792,8 @@ export function WorkflowCanvas() {
         let currentX = sortedNodes[0].position.x;
 
         sortedNodes.forEach((node) => {
-          const nodeWidth = (node.style?.width as number) || (node.measured?.width) || 220;
+          const nodeWidth =
+            (node.style?.width as number) || node.measured?.width || 220;
 
           onNodesChange([
             {
@@ -698,10 +824,14 @@ export function WorkflowCanvas() {
 
         // Get max node dimensions for consistent spacing
         const maxWidth = Math.max(
-          ...sortedNodes.map((n) => (n.style?.width as number) || (n.measured?.width) || 220)
+          ...sortedNodes.map(
+            (n) => (n.style?.width as number) || n.measured?.width || 220
+          )
         );
         const maxHeight = Math.max(
-          ...sortedNodes.map((n) => (n.style?.height as number) || (n.measured?.height) || 200)
+          ...sortedNodes.map(
+            (n) => (n.style?.height as number) || n.measured?.height || 200
+          )
         );
 
         // Position each node in the grid
@@ -725,14 +855,26 @@ export function WorkflowCanvas() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, clearClipboard, clipboard, getViewport, addNode, updateNodeData]);
+  }, [
+    nodes,
+    onNodesChange,
+    copySelectedNodes,
+    pasteNodes,
+    clearClipboard,
+    clipboard,
+    getViewport,
+    addNode,
+    updateNodeData,
+  ]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
 
     // Check if dragging a node type from the action bar
-    const hasNodeType = Array.from(event.dataTransfer.types).includes("application/node-type");
+    const hasNodeType = Array.from(event.dataTransfer.types).includes(
+      "application/node-type"
+    );
     if (hasNodeType) {
       setIsDragOver(true);
       setDropType("node");
@@ -740,7 +882,9 @@ export function WorkflowCanvas() {
     }
 
     // Check if dragging a history image
-    const hasHistoryImage = Array.from(event.dataTransfer.types).includes("application/history-image");
+    const hasHistoryImage = Array.from(event.dataTransfer.types).includes(
+      "application/history-image"
+    );
     if (hasHistoryImage) {
       setIsDragOver(true);
       setDropType("image");
@@ -778,7 +922,9 @@ export function WorkflowCanvas() {
       setDropType(null);
 
       // Check for node type drop from action bar
-      const nodeType = event.dataTransfer.getData("application/node-type") as NodeType;
+      const nodeType = event.dataTransfer.getData(
+        "application/node-type"
+      ) as NodeType;
       if (nodeType) {
         const position = screenToFlowPosition({
           x: event.clientX,
@@ -789,7 +935,9 @@ export function WorkflowCanvas() {
       }
 
       // Check for history image drop
-      const historyImageData = event.dataTransfer.getData("application/history-image");
+      const historyImageData = event.dataTransfer.getData(
+        "application/history-image"
+      );
       if (historyImageData) {
         try {
           const { image, prompt } = JSON.parse(historyImageData);
@@ -820,13 +968,18 @@ export function WorkflowCanvas() {
       const allFiles = Array.from(event.dataTransfer.files);
 
       // Check for JSON workflow files first
-      const jsonFiles = allFiles.filter((file) => file.type === "application/json" || file.name.endsWith(".json"));
+      const jsonFiles = allFiles.filter(
+        (file) =>
+          file.type === "application/json" || file.name.endsWith(".json")
+      );
       if (jsonFiles.length > 0) {
         const file = jsonFiles[0];
         const reader = new FileReader();
         reader.onload = (e) => {
           try {
-            const workflow = JSON.parse(e.target?.result as string) as WorkflowFile;
+            const workflow = JSON.parse(
+              e.target?.result as string
+            ) as WorkflowFile;
             if (workflow.version && workflow.nodes && workflow.edges) {
               loadWorkflow(workflow);
             } else {
@@ -841,7 +994,9 @@ export function WorkflowCanvas() {
       }
 
       // Handle image files
-      const imageFiles = allFiles.filter((file) => file.type.startsWith("image/"));
+      const imageFiles = allFiles.filter((file) =>
+        file.type.startsWith("image/")
+      );
       if (imageFiles.length === 0) return;
 
       // Get the drop position in flow coordinates
@@ -883,7 +1038,9 @@ export function WorkflowCanvas() {
   return (
     <div
       ref={reactFlowWrapper}
-      className={`flex-1 bg-canvas-bg relative ${isDragOver ? "ring-2 ring-inset ring-blue-500" : ""}`}
+      className={`flex-1 bg-canvas-bg relative ${
+        isDragOver ? "ring-2 ring-inset ring-blue-500" : ""
+      }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -908,7 +1065,9 @@ export function WorkflowCanvas() {
         <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center">
           <div className="bg-neutral-800 border border-neutral-600 rounded-lg px-6 py-4 shadow-xl flex items-center gap-3">
             <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-neutral-200 text-sm font-medium">Splitting image grid...</p>
+            <p className="text-neutral-200 text-sm font-medium">
+              Splitting image grid...
+            </p>
           </div>
         </div>
       )}
@@ -958,6 +1117,8 @@ export function WorkflowCanvas() {
                 return "#06b6d4";
               case "output":
                 return "#ef4444";
+              case "gridSplit":
+                return "#a855f7";
               default:
                 return "#94a3b8";
             }

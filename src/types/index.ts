@@ -7,10 +7,21 @@ export type NodeType =
   | "prompt"
   | "nanoBanana"
   | "llmGenerate"
-  | "output";
+  | "output"
+  | "gridSplit";
 
 // Aspect Ratios (supported by both Nano Banana and Nano Banana Pro)
-export type AspectRatio = "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
+export type AspectRatio =
+  | "1:1"
+  | "2:3"
+  | "3:2"
+  | "3:4"
+  | "4:3"
+  | "4:5"
+  | "5:4"
+  | "9:16"
+  | "16:9"
+  | "21:9";
 
 // Resolution Options (only supported by Nano Banana Pro)
 export type Resolution = "1K" | "2K" | "4K";
@@ -109,9 +120,9 @@ export interface PromptNodeData extends BaseNodeData {
 // Image History Item (for tracking generated images)
 export interface ImageHistoryItem {
   id: string;
-  image: string;          // Base64 data URL
-  timestamp: number;      // For display & sorting
-  prompt: string;         // The prompt used
+  image: string; // Base64 data URL
+  timestamp: number; // For display & sorting
+  prompt: string; // The prompt used
   aspectRatio: AspectRatio;
   model: ModelType;
 }
@@ -146,6 +157,16 @@ export interface OutputNodeData extends BaseNodeData {
   image: string | null;
 }
 
+// Grid Split Node Data
+export interface GridSplitNodeData extends BaseNodeData {
+  inputImage: string | null;
+  rows: number;
+  columns: number;
+  status: NodeStatus;
+  error: string | null;
+  tileOutputs: Record<string, string>; // handleId -> base64 image
+}
+
 // Union of all node data types
 export type WorkflowNodeData =
   | ImageInputNodeData
@@ -153,7 +174,8 @@ export type WorkflowNodeData =
   | PromptNodeData
   | NanoBananaNodeData
   | LLMGenerateNodeData
-  | OutputNodeData;
+  | OutputNodeData
+  | GridSplitNodeData;
 
 // Workflow Node with typed data (extended with optional groupId)
 export type WorkflowNode = Node<WorkflowNodeData, NodeType> & {
@@ -203,7 +225,13 @@ export interface LLMGenerateResponse {
 }
 
 // Tool Types for annotation
-export type ToolType = "select" | "rectangle" | "circle" | "arrow" | "freehand" | "text";
+export type ToolType =
+  | "select"
+  | "rectangle"
+  | "circle"
+  | "arrow"
+  | "freehand"
+  | "text";
 
 // Tool Options
 export interface ToolOptions {

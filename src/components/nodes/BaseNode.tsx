@@ -14,6 +14,8 @@ interface BaseNodeProps {
   className?: string;
   minWidth?: number;
   minHeight?: number;
+  status?: string;
+  icon?: ReactNode;
 }
 
 export function BaseNode({
@@ -35,7 +37,9 @@ export function BaseNode({
   const handleResize: OnResize = useCallback(
     (event, params) => {
       const allNodes = getNodes();
-      const selectedNodes = allNodes.filter((node) => node.selected && node.id !== id);
+      const selectedNodes = allNodes.filter(
+        (node) => node.selected && node.id !== id
+      );
 
       if (selectedNodes.length > 0) {
         // Apply the same dimensions to all other selected nodes by updating their style
@@ -71,17 +75,26 @@ export function BaseNode({
       />
       <div
         className={`
-          bg-neutral-800 rounded-md shadow-lg border h-full w-full
-          ${isCurrentlyExecuting || isExecuting ? "border-blue-500 ring-1 ring-blue-500/20" : "border-neutral-700"}
-          ${hasError ? "border-red-500" : ""}
-          ${selected ? "border-neutral-400 ring-1 ring-neutral-400/30" : ""}
+          bg-neutral-800 rounded-md shadow-lg h-full w-full
+          ${
+            selected
+              ? "border-2 border-blue-400 ring-4 ring-blue-400/40 shadow-blue-500/20"
+              : isCurrentlyExecuting || isExecuting
+              ? "border-2 border-blue-500 ring-2 ring-blue-500/20"
+              : "border border-neutral-700"
+          }
+          ${hasError ? "!border-red-500" : ""}
           ${className}
         `}
       >
         <div className="px-3 pt-2 pb-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">{title}</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            {title}
+          </span>
         </div>
-        <div className="px-3 pb-4 h-[calc(100%-28px)] overflow-hidden flex flex-col">{children}</div>
+        <div className="px-3 pb-4 h-[calc(100%-28px)] overflow-hidden flex flex-col">
+          {children}
+        </div>
       </div>
     </>
   );
