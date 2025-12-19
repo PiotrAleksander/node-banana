@@ -1,3 +1,5 @@
+.PHONY: dev sync-fork setup-upstream
+
 dev:
 	npm run dev
 

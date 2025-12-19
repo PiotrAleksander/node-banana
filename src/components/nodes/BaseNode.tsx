@@ -83,7 +83,7 @@ export function BaseNode({
               ? "border-2 border-blue-500 ring-2 ring-blue-500/20"
               : "border border-neutral-700"
           }
-          ${hasError ? "!border-red-500" : ""}
+          ${hasError ? "border-red-500!" : ""}
           ${className}
         `}
       >
